@@ -18,6 +18,7 @@ internal/tui/styles.go            # Lipgloss style constants (package tui)
 internal/session/session.go       # Session data type, sorting, path utils (package session)
 internal/session/scanner.go       # Process discovery via ps (package session)
 internal/session/tmux.go          # tmux pane mapping via process tree walk (package session)
+internal/session/status.go        # Pane capture & busy/idle detection (package session)
 internal/tmux/jump.go             # tmux switch/attach via syscall.Exec (package tmux)
 docs/SPEC.md                      # Feature spec and build plan
 ```
@@ -43,9 +44,19 @@ Two modes via a state machine in `model.Update()`:
 
 After TUI exits, if a session was selected, `tmux.Jump()` uses `syscall.Exec` to replace the process with `tmux switch-client -t <target>` (inside tmux) or `tmux attach-session -t <target>` (outside tmux). This ensures the tmux popup closes cleanly.
 
+### Session Status
+
+`session.CaptureStatuses()` runs `tmux capture-pane -t <target> -p` for each session with a tmux pane, then `detectStatus()` scans the pane content:
+
+- **Busy** — a line starts with a spinner char (`✻✽✳·✶✢`) followed by text ending with `…` (e.g., `✻ Fiddle-faddling…`)
+- **Idle** — the prompt character `❯` is visible
+- **Unknown** — neither pattern found, or session is detached
+
+Busy sessions display an animated yellow spinner in the TUI (150ms frame interval). Idle sessions show a green dot `●`. Unknown/detached sessions show a dim dot.
+
 ### Refresh
 
-A 2-second tick re-scans processes and updates the list. Cursor position is preserved by matching on PID across refreshes.
+A 2-second tick re-scans processes and updates the list. Cursor position is preserved by matching on PID across refreshes. A separate 150ms tick drives the spinner animation for busy sessions.
 
 ## Commands
 

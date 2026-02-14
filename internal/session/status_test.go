@@ -62,6 +62,15 @@ func TestDetectStatus_WhitespaceOnly(t *testing.T) {
 	}
 }
 
+func TestDetectStatus_CompletionMessageWithoutPrompt(t *testing.T) {
+	// Completion message without ellipsis and no prompt → unknown
+	paneContent := "✻ Worked for 2m 17s\n"
+	status := detectStatus(paneContent)
+	if status != StatusUnknown {
+		t.Errorf("expected StatusUnknown for completion message without prompt, got %d", status)
+	}
+}
+
 func TestDetectStatus_SpinnerTakesPrecedenceOverPrompt(t *testing.T) {
 	// If both spinner activity and prompt are visible, spinner wins (busy)
 	paneContent := "❯ claude\n✻ Working on something…\n"

@@ -38,6 +38,7 @@ Each session entry contains:
 - **Working directory**: shortened path (`~` for home, truncate long paths)
 - **tmux target**: `session:window.pane` string (empty if detached)
 - **Project name**: last path component of the working directory
+- **Status**: busy, idle, or unknown (determined by pane capture)
 
 Sessions are sorted alphabetically by tmux session name, then by window index.
 
@@ -95,7 +96,6 @@ Keep the list current while the popup is open.
 
 These are explicitly deferred:
 
-- Session status indicators (running/idle/waiting)
 - CPU/memory usage display
 - Process kill functionality
 - Theme system / color configuration
@@ -115,12 +115,12 @@ claude-tmux/
 ├── internal/
 │   ├── tui/
 │   │   ├── model.go             # Bubbletea model, Update, View
-│   │   ├── styles.go            # Lipgloss style definitions
-│   │   └── keys.go              # Keybinding definitions
+│   │   └── styles.go            # Lipgloss style definitions
 │   ├── session/
 │   │   ├── scanner.go           # Process discovery (F1)
 │   │   ├── tmux.go              # tmux pane mapping (F2)
-│   │   └── session.go           # Session data type (F3)
+│   │   ├── session.go           # Session data type (F3)
+│   │   └── status.go            # Pane capture & busy/idle detection
 │   └── tmux/
 │       └── jump.go              # tmux switch/attach logic (F5)
 ├── docs/
@@ -138,9 +138,10 @@ claude-tmux/
 
 **`internal/session`** — All session discovery logic. No TUI dependency.
 
-- `session.go` — `Session` struct definition + sorting.
+- `session.go` — `Session` struct definition, `Status` type, sorting.
 - `scanner.go` — `Scan() ([]Session, error)` — runs ps, parses output, filters children, resolves working directories.
 - `tmux.go` — `MapPanes(sessions []Session) []Session` — queries tmux, walks process trees, attaches pane targets.
+- `status.go` — `CaptureStatuses(sessions []Session)` — captures tmux pane content, detects busy/idle/unknown status via spinner and prompt patterns.
 
 **`internal/tui`** — Bubbletea model, view, and styles.
 
