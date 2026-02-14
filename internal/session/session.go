@@ -15,6 +15,7 @@ const (
 	StatusUnknown Status = iota
 	StatusIdle
 	StatusBusy
+	StatusWaiting
 )
 
 // Session represents a running Claude Code process mapped to a tmux pane.

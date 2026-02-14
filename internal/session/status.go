@@ -2,7 +2,9 @@ package session
 
 import (
 	"os/exec"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // spinnerChars are the characters Claude Code uses for its activity spinner.
@@ -31,16 +33,73 @@ func capturePaneContent(tmuxTarget string) string {
 	return string(output)
 }
 
-// detectStatus examines pane content to determine if a Claude session is busy or idle.
+// parseNumberedOption checks if a line represents a numbered option (e.g., "1. Yes"
+// or "❯ 1. Yes"). It strips leading whitespace and an optional ❯ prefix, then looks
+// for a pattern of digit(s) + period + space + text. Returns the option number and
+// whether the line had a ❯ prefix.
+func parseNumberedOption(line string) (optionNumber int, hasSelector bool, matched bool) {
+	trimmedLine := strings.TrimLeftFunc(line, unicode.IsSpace)
+	if trimmedLine == "" {
+		return 0, false, false
+	}
+
+	// Check for and strip ❯ prefix
+	if strings.HasPrefix(trimmedLine, "❯") {
+		hasSelector = true
+		trimmedLine = strings.TrimPrefix(trimmedLine, "❯")
+		trimmedLine = strings.TrimLeftFunc(trimmedLine, unicode.IsSpace)
+	}
+
+	// Look for "N. text" pattern: digit(s), period, space, then text
+	dotIndex := strings.Index(trimmedLine, ". ")
+	if dotIndex < 1 {
+		return 0, false, false
+	}
+
+	numberPart := trimmedLine[:dotIndex]
+	parsedNumber, err := strconv.Atoi(numberPart)
+	if err != nil {
+		return 0, false, false
+	}
+
+	return parsedNumber, hasSelector, true
+}
+
+// detectNumberedOptions scans lines for an interactive numbered option menu.
+// Returns true if at least options 1 and 2 are found AND at least one line has
+// a ❯ selector prefix before its number.
+func detectNumberedOptions(lines []string) bool {
+	foundOptions := make(map[int]bool)
+	hasSelectorOnOption := false
+
+	for _, line := range lines {
+		optionNumber, hasSelector, matched := parseNumberedOption(line)
+		if !matched {
+			continue
+		}
+		foundOptions[optionNumber] = true
+		if hasSelector {
+			hasSelectorOnOption = true
+		}
+	}
+
+	return foundOptions[1] && foundOptions[2] && hasSelectorOnOption
+}
+
+// detectStatus examines pane content to determine if a Claude session is busy,
+// waiting for input, or idle.
 //
 // A session is considered busy if a line starts with a spinner character followed
 // by text ending with an ellipsis (…), which indicates an active spinner like
 // "✻ Fiddle-faddling…". Completion messages like "✻ Worked for 2m 17s" do NOT
 // end with ellipsis and are not treated as busy.
 //
+// A session is considered waiting if the pane contains an interactive numbered
+// option menu (at least options 1 and 2 present, with a ❯ selector on one of them).
+//
 // A session is considered idle if the prompt character (❯) is visible.
 //
-// Otherwise the status is unknown.
+// Priority: busy > waiting > idle > unknown.
 func detectStatus(paneContent string) Status {
 	if paneContent == "" {
 		return StatusUnknown
@@ -76,6 +135,9 @@ func detectStatus(paneContent string) Status {
 
 	if hasSpinnerActivity {
 		return StatusBusy
+	}
+	if detectNumberedOptions(lines) {
+		return StatusWaiting
 	}
 	if hasPrompt {
 		return StatusIdle

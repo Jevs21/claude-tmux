@@ -335,6 +335,11 @@ func (m model) renderStatusIndicator(status session.Status, isSelected bool) str
 			return statusBusySelectedStyle.Render(char) + " "
 		}
 		return statusBusyStyle.Render(char) + " "
+	case session.StatusWaiting:
+		if isSelected {
+			return statusWaitingSelectedStyle.Render("?") + " "
+		}
+		return statusWaitingStyle.Render("?") + " "
 	case session.StatusIdle:
 		if isSelected {
 			return statusIdleSelectedStyle.Render("●") + " "

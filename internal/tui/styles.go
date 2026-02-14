@@ -83,6 +83,13 @@ var (
 				Foreground(colorYellow).
 				Background(colorSelectedBg)
 
+	statusWaitingStyle = lipgloss.NewStyle().
+				Foreground(colorBlue)
+
+	statusWaitingSelectedStyle = lipgloss.NewStyle().
+					Foreground(colorBlue).
+					Background(colorSelectedBg)
+
 	statusIdleStyle = lipgloss.NewStyle().
 			Foreground(colorGreen)
 

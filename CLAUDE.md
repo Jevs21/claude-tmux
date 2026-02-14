@@ -49,10 +49,11 @@ After TUI exits, if a session was selected, `tmux.Jump()` uses `syscall.Exec` to
 `session.CaptureStatuses()` runs `tmux capture-pane -t <target> -p` for each session with a tmux pane, then `detectStatus()` scans the pane content:
 
 - **Busy** — a line starts with a spinner char (`✻✽✳·✶✢`) followed by text ending with `…` (e.g., `✻ Fiddle-faddling…`)
+- **Waiting** — lines contain sequential numbered options (`1.`, `2.`, …) with `❯` selector prefix; shown as blue `?`
 - **Idle** — the prompt character `❯` is visible
 - **Unknown** — neither pattern found, or session is detached
 
-Busy sessions display an animated yellow spinner in the TUI (150ms frame interval). Idle sessions show a green dot `●`. Unknown/detached sessions show a dim dot.
+Busy sessions display an animated yellow spinner in the TUI (150ms frame interval). Waiting sessions show a blue `?`. Idle sessions show a green dot `●`. Unknown/detached sessions show a dim dot.
 
 ### Refresh
 

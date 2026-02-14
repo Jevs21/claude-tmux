@@ -79,3 +79,80 @@ func TestDetectStatus_SpinnerTakesPrecedenceOverPrompt(t *testing.T) {
 		t.Errorf("expected StatusBusy when both spinner and prompt present, got %d", status)
 	}
 }
+
+func TestDetectStatus_WaitingWithTwoOptions(t *testing.T) {
+	paneContent := "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting for yes/no prompt, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingWithThreeOptions(t *testing.T) {
+	paneContent := "Allow access to /tmp/foo?\n❯ 1. Allow once\n  2. Allow always\n  3. Deny\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting for permission prompt, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingCursorOnSecondOption(t *testing.T) {
+	paneContent := "Choose an option:\n  1. Option A\n❯ 2. Option B\n  3. Option C\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting when cursor is on second option, got %d", status)
+	}
+}
+
+func TestDetectStatus_NotWaitingNumberedListWithoutSelector(t *testing.T) {
+	// A markdown numbered list in Claude output with an idle ❯ prompt should be idle, not waiting.
+	// The ❯ is on its own prompt line, not prefixing a numbered option.
+	paneContent := "Here are some steps:\n1. First step\n2. Second step\n3. Third step\n❯ \n"
+	status := detectStatus(paneContent)
+	if status != StatusIdle {
+		t.Errorf("expected StatusIdle for numbered list without selector on option, got %d", status)
+	}
+}
+
+func TestDetectStatus_NotWaitingSingleOption(t *testing.T) {
+	// Only one numbered option found — not enough to be an interactive menu
+	paneContent := "❯ 1. Yes\n"
+	status := detectStatus(paneContent)
+	if status != StatusIdle {
+		t.Errorf("expected StatusIdle for single option, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingTakesPrecedenceOverIdle(t *testing.T) {
+	// Both ❯ prompt and numbered options are present — waiting wins over idle
+	paneContent := "Some output\n❯ 1. Allow\n  2. Deny\n❯ \n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting to take precedence over idle, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingRealClaudeCodePermissionPrompt(t *testing.T) {
+	// Real Claude Code permission prompt format with tool description block
+	paneContent := " Bash command\n\n" +
+		"   git add CLAUDE.md internal/session/session.go internal/session/status.go internal/session/status_test.go\n" +
+		"   internal/tui/model.go internal/tui/styles.go\n" +
+		"   Stage all modified files\n\n" +
+		" Do you want to proceed?\n" +
+		" ❯ 1. Yes\n" +
+		"   2. Yes, and don't ask again for git add commands in /Users/user/projects/claude-tmux\n" +
+		"   3. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting for real Claude Code permission prompt, got %d", status)
+	}
+}
+
+func TestDetectStatus_BusyTakesPrecedenceOverWaiting(t *testing.T) {
+	// Spinner activity + numbered options — busy wins
+	paneContent := "✻ Working…\n❯ 1. Allow\n  2. Deny\n"
+	status := detectStatus(paneContent)
+	if status != StatusBusy {
+		t.Errorf("expected StatusBusy to take precedence over waiting, got %d", status)
+	}
+}
