@@ -103,4 +103,13 @@ var (
 	statusUnknownSelectedStyle = lipgloss.NewStyle().
 					Foreground(colorDim).
 					Background(colorSelectedBg)
+
+	actionStyle = lipgloss.NewStyle().
+			Foreground(colorDim).
+			Italic(true)
+
+	actionSelectedStyle = lipgloss.NewStyle().
+				Foreground(colorAqua).
+				Italic(true).
+				Background(colorSelectedBg)
 )

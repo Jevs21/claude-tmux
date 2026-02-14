@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const refreshInterval = 2 * time.Second
+const refreshInterval = 750 * time.Millisecond
 const spinnerInterval = 150 * time.Millisecond
 
 // spinnerFrames are the characters used for the busy status animation,
@@ -42,7 +42,7 @@ type model struct {
 	spinnerFrame int    // current index into spinnerFrames for busy animation
 }
 
-// sessionsMsg carries the result of an async session scan.
+// sessionsMsg carries the result of an async session read.
 type sessionsMsg struct {
 	sessions []session.Session
 	err      error
@@ -54,15 +54,12 @@ type tickMsg time.Time
 // spinnerTickMsg triggers a spinner frame advance.
 type spinnerTickMsg time.Time
 
-// scanCmd runs a full session scan asynchronously.
+// scanCmd reads sessions from the event log.
 func scanCmd() tea.Msg {
-	sessions, err := session.Scan()
+	sessions, err := session.ReadSessions()
 	if err != nil {
 		return sessionsMsg{err: err}
 	}
-	sessions = session.MapPanes(sessions)
-	session.CaptureStatuses(sessions)
-	session.SortSessions(sessions)
 	return sessionsMsg{sessions: sessions}
 }
 
@@ -108,10 +105,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		previousPID := m.selectedPID()
+		previousSessionID := m.selectedSessionID()
 		m.sessions = msg.sessions
 		m.applyFilter()
-		m.restoreCursorByPID(previousPID)
+		m.restoreCursorBySessionID(previousSessionID)
 		return m, nil
 
 	case tickMsg:
@@ -256,6 +253,7 @@ func (m model) View() string {
 	// Calculate column widths for alignment
 	maxProjectWidth := 0
 	maxTargetWidth := 0
+	maxActionWidth := 0
 	for _, s := range m.filtered {
 		if len(s.ProjectName) > maxProjectWidth {
 			maxProjectWidth = len(s.ProjectName)
@@ -263,6 +261,9 @@ func (m model) View() string {
 		displayTarget := s.DisplayTarget()
 		if len(displayTarget) > maxTargetWidth {
 			maxTargetWidth = len(displayTarget)
+		}
+		if len(s.Action) > maxActionWidth {
+			maxActionWidth = len(s.Action)
 		}
 	}
 
@@ -289,6 +290,13 @@ func (m model) View() string {
 			}
 			displayPath := pathSelectedStyle.Render(s.DisplayPath())
 			line = cursor + statusIndicator + projectName + "  " + target + "  " + displayPath
+
+			if s.Action != "" {
+				actionText := actionSelectedStyle.
+					Width(maxActionWidth).
+					Render(s.Action)
+				line += "  " + actionText
+			}
 		} else {
 			cursor := "  "
 			projectName := projectStyle.
@@ -304,6 +312,13 @@ func (m model) View() string {
 			}
 			displayPath := pathStyle.Render(s.DisplayPath())
 			line = cursor + statusIndicator + projectName + "  " + target + "  " + displayPath
+
+			if s.Action != "" {
+				actionText := actionStyle.
+					Width(maxActionWidth).
+					Render(s.Action)
+				line += "  " + actionText
+			}
 		}
 
 		// Truncate to terminal width
@@ -380,22 +395,22 @@ func (m *model) clampCursor() {
 	}
 }
 
-// selectedPID returns the PID of the currently selected session, or 0 if none.
-func (m model) selectedPID() int {
+// selectedSessionID returns the SessionID of the currently selected session, or empty if none.
+func (m model) selectedSessionID() string {
 	if m.cursor >= 0 && m.cursor < len(m.filtered) {
-		return m.filtered[m.cursor].PID
+		return m.filtered[m.cursor].SessionID
 	}
-	return 0
+	return ""
 }
 
-// restoreCursorByPID attempts to restore the cursor to the session with the given PID.
-func (m *model) restoreCursorByPID(pid int) {
-	if pid == 0 {
+// restoreCursorBySessionID attempts to restore the cursor to the session with the given ID.
+func (m *model) restoreCursorBySessionID(sessionID string) {
+	if sessionID == "" {
 		m.clampCursor()
 		return
 	}
 	for i, s := range m.filtered {
-		if s.PID == pid {
+		if s.SessionID == sessionID {
 			m.cursor = i
 			return
 		}
@@ -419,6 +434,9 @@ func truncateToWidth(s string, maxWidth int) string {
 
 // Run starts the Bubbletea TUI program and handles the jump after exit.
 func Run() error {
+	// Rotate log on startup to prevent unbounded growth
+	_ = session.RotateLog()
+
 	m := initialModel()
 	program := tea.NewProgram(m, tea.WithAltScreen())
 

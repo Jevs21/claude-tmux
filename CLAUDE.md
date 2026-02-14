@@ -13,51 +13,77 @@ A TUI tool for navigating between running Claude Code sessions in tmux.
 
 ```
 cmd/claude-tmux/main.go          # Thin entry point (package main)
+hooks/claude-tmux-hook.sh        # Bash hook for Claude Code event capture
 internal/tui/model.go             # Bubbletea model & TUI logic (package tui)
 internal/tui/styles.go            # Lipgloss style constants (package tui)
 internal/session/session.go       # Session data type, sorting, path utils (package session)
-internal/session/scanner.go       # Process discovery via ps (package session)
-internal/session/tmux.go          # tmux pane mapping via process tree walk (package session)
-internal/session/status.go        # Pane capture & busy/idle detection (package session)
+internal/session/events.go        # Event log reader & state derivation (package session)
 internal/tmux/jump.go             # tmux switch/attach via syscall.Exec (package tmux)
 docs/SPEC.md                      # Feature spec and build plan
 ```
 
 ## Architecture
 
-### Session Discovery
+### Hooks-based Session Monitoring
 
-`session.Scan()` runs `ps -axo pid,ppid,comm` to find processes where comm == "claude". Child processes (where parent is also claude) are filtered out. Working directories are resolved via `lsof -p <pid>` (macOS) or `/proc/<pid>/cwd` (Linux).
+Session state is derived from a structured event log written by a Claude Code hook script, rather than process scanning or pane capture.
 
-### tmux Mapping
+```
+Hook fires (Claude Code) -> bash script appends JSON line -> ~/.claude-tmux/events.log
+                                                                    ^
+                                              Go TUI reads file on 750ms tick
+```
 
-`session.MapPanes()` runs `tmux list-panes -a` to get all pane PIDs, then walks each Claude process up the PID→PPID tree (max 25 hops) to find a matching tmux pane. Sessions without a pane match are shown as "detached".
+### Hook Script
+
+`hooks/claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1` and reads the JSON payload from stdin. It extracts `session_id`, `cwd`, and `tool_name` via `jq`, captures the Claude PID via `$PPID` and the tmux target via `tmux display-message`, then appends a single JSON line to `~/.claude-tmux/events.log`.
+
+### Event Log Format
+
+One JSON object per line in `~/.claude-tmux/events.log`:
+
+```json
+{"ts":1707900000,"sid":"d2abb274-...","event":"session-start","pid":12345,"cwd":"/path","tmux":"work:2.0","tool":""}
+{"ts":1707900005,"sid":"d2abb274-...","event":"pre-tool-use","pid":12345,"cwd":"/path","tmux":"work:2.0","tool":"Bash"}
+```
+
+### State Derivation
+
+`session.ReadSessions()` reads the event log and derives session states:
+
+| Event | Status | Action |
+|-------|--------|--------|
+| `session-start` | Idle | -- |
+| `user-prompt-submit` | Busy | Thinking... |
+| `pre-tool-use` | Busy | {tool_name} |
+| `post-tool-use` / `post-tool-use-failure` | Busy | -- |
+| `stop` | Idle | -- |
+| `permission-request` | Waiting | Permission |
+| `notification-idle` | Idle | -- |
+| `notification-permission` | Waiting | Permission |
+| `notification-elicitation` | Waiting | Input |
+| `session-end` | (remove session) | -- |
+
+Dead sessions (where `ClaudePID` is no longer alive) are pruned automatically. The log is rotated on startup (truncated to 500 lines if exceeding 1000).
 
 ### TUI Modes
 
 Two modes via a state machine in `model.Update()`:
 
-- **modeNormal** — Browse with j/k, enter to jump, / to filter, q to quit
-- **modeFilter** — Text input filters sessions by substring match against project name, path, or tmux target
+- **modeNormal** -- Browse with j/k, enter to jump, / to filter, q to quit
+- **modeFilter** -- Text input filters sessions by substring match against project name, path, or tmux target
 
 ### Jump Mechanism
 
 After TUI exits, if a session was selected, `tmux.Jump()` uses `syscall.Exec` to replace the process with `tmux switch-client -t <target>` (inside tmux) or `tmux attach-session -t <target>` (outside tmux). This ensures the tmux popup closes cleanly.
 
-### Session Status
+### Session Status Display
 
-`session.CaptureStatuses()` runs `tmux capture-pane -t <target> -p` for each session with a tmux pane, then `detectStatus()` scans the pane content:
-
-- **Busy** — a line starts with a spinner char (`✻✽✳·✶✢`) followed by text ending with `…` (e.g., `✻ Fiddle-faddling…`)
-- **Waiting** — lines contain sequential numbered options (`1.`, `2.`, …) with `❯` selector prefix; shown as blue `?`
-- **Idle** — the prompt character `❯` is visible
-- **Unknown** — neither pattern found, or session is detached
-
-Busy sessions display an animated yellow spinner in the TUI (150ms frame interval). Waiting sessions show a blue `?`. Idle sessions show a green dot `●`. Unknown/detached sessions show a dim dot.
+Busy sessions display an animated yellow spinner in the TUI (150ms frame interval) with the current action (tool name or "Thinking...") shown in a dim italic column. Waiting sessions show a blue `?` with "Permission" or "Input". Idle sessions show a green dot. Unknown/detached sessions show a dim dot.
 
 ### Refresh
 
-A 2-second tick re-scans processes and updates the list. Cursor position is preserved by matching on PID across refreshes. A separate 150ms tick drives the spinner animation for busy sessions.
+A 750ms tick re-reads the event log and updates the list. Cursor position is preserved by matching on SessionID across refreshes. A separate 150ms tick drives the spinner animation for busy sessions.
 
 ## Commands
 
@@ -65,6 +91,7 @@ A 2-second tick re-scans processes and updates the list. Cursor position is pres
 - `go test ./...` - Run tests
 - `./claude-tmux` - Run the TUI
 - `./claude-tmux --version` - Show version
+- `make install-hook` - Show hook installation instructions
 
 ## tmux Integration
 
@@ -72,6 +99,10 @@ Add to `~/.tmux.conf`:
 ```
 bind-key a display-popup -E "claude-tmux"
 ```
+
+## Hook Installation
+
+The hook script requires `jq`. Install the hook by adding the configuration to `~/.claude/settings.json` (see `make install-hook` for the full config block).
 
 ## Keybindings
 

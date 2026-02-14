@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Status represents the activity state of a Claude Code session.
@@ -18,10 +19,10 @@ const (
 	StatusWaiting
 )
 
-// Session represents a running Claude Code process mapped to a tmux pane.
+// Session represents a running Claude Code session derived from hook events.
 type Session struct {
-	PID         int
-	PPID        int
+	SessionID   string
+	ClaudePID   int
 	WorkDir     string
 	ProjectName string
 	TmuxTarget  string // "session:window.pane" or empty if detached
@@ -29,6 +30,8 @@ type Session struct {
 	WindowIndex int
 	PaneIndex   int
 	Status      Status
+	Action      string    // current activity description (e.g., "Bash", "Thinking...")
+	LastUpdate  time.Time // timestamp of the most recent event
 }
 
 // DisplayPath returns the working directory with the home directory replaced by ~

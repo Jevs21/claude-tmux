@@ -42,19 +42,19 @@ func TestShortenPath(t *testing.T) {
 
 func TestSortSessions(t *testing.T) {
 	sessions := []Session{
-		{PID: 1, TmuxSession: "work", TmuxTarget: "work:2.0", WindowIndex: 2},
-		{PID: 2, TmuxTarget: ""}, // detached
-		{PID: 3, TmuxSession: "dev", TmuxTarget: "dev:0.0", WindowIndex: 0},
-		{PID: 4, TmuxSession: "work", TmuxTarget: "work:0.0", WindowIndex: 0},
+		{SessionID: "aaa", TmuxSession: "work", TmuxTarget: "work:2.0", WindowIndex: 2},
+		{SessionID: "bbb", TmuxTarget: ""}, // detached
+		{SessionID: "ccc", TmuxSession: "dev", TmuxTarget: "dev:0.0", WindowIndex: 0},
+		{SessionID: "ddd", TmuxSession: "work", TmuxTarget: "work:0.0", WindowIndex: 0},
 	}
 
 	SortSessions(sessions)
 
 	// Expected order: dev:0, work:0, work:2, detached
-	expectedPIDs := []int{3, 4, 1, 2}
-	for i, expectedPID := range expectedPIDs {
-		if sessions[i].PID != expectedPID {
-			t.Errorf("position %d: expected PID %d, got PID %d", i, expectedPID, sessions[i].PID)
+	expectedSessionIDs := []string{"ccc", "ddd", "aaa", "bbb"}
+	for i, expectedSessionID := range expectedSessionIDs {
+		if sessions[i].SessionID != expectedSessionID {
+			t.Errorf("position %d: expected SessionID %s, got %s", i, expectedSessionID, sessions[i].SessionID)
 		}
 	}
 }

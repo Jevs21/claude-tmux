@@ -4,41 +4,46 @@ A Go TUI tool (using Bubbletea) that runs as a tmux popup, listing active Claude
 
 ---
 
-## Core Functionality (MVP)
+## Core Functionality
 
-Find all running `claude` processes, map each to its tmux pane, display them in a navigable list, and switch to the selected pane on enter.
+Find all running Claude Code sessions via a hooks-based event log, display them in a navigable list with live status, and switch to the selected pane on enter.
 
 ---
 
 ## Feature List
 
-### F1 — Process Discovery
+### F1 — Hooks-based Session Discovery
 
-Detect running Claude Code sessions by scanning system processes.
+Detect running Claude Code sessions via structured event logging.
 
-- Run `ps -axo pid,ppid,comm,command` and match processes where `comm` == `claude`.
-- Filter out child processes: build a PID→PPID map; if a matched process's parent is also a matched process, exclude the child.
-- Collect per-process: PID, PPID, working directory (from `lsof -p <pid> -Fn` cwd entry, or `/proc/<pid>/cwd` on Linux).
+- A bash hook script (`hooks/claude-tmux-hook.sh`) is configured in `~/.claude/settings.json` for all Claude Code lifecycle events.
+- The hook receives the event name as `$1`, reads the JSON payload from stdin, extracts `session_id`, `cwd`, and `tool_name` via `jq`.
+- It captures the Claude PID via `$PPID` and the tmux target via `tmux display-message` (if `$TMUX` is set).
+- Each event is appended as a single JSON line to `~/.claude-tmux/events.log`.
 
-### F2 — tmux Pane Mapping
+### F2 — Event Log Reading & State Derivation
 
-Map each Claude process to the tmux pane it's running in.
+Build session state from the event stream.
 
-- Run `tmux list-panes -a -F "#{pane_pid} #{session_name} #{window_index} #{pane_index}"` once to get all pane PIDs.
-- Build a map of `panePID → tmuxTarget` where `tmuxTarget` is `session:window.pane`.
-- For each Claude process, walk up the process tree (PID→PPID, up to 25 hops) until a PID matches a tmux pane PID.
-- If no match found, the session is "detached" (still shown, but not jumpable).
+- `session.ReadSessions()` opens `~/.claude-tmux/events.log` and scans line by line.
+- Each line is parsed as JSON into a `RawEvent` struct.
+- Events are applied to a `map[string]*Session` keyed by session ID:
+  - `session-start` → create session entry
+  - `session-end` → delete session entry
+  - Other events → update Status and Action per the mapping table
+- Dead sessions (where `ClaudePID` is no longer alive) are pruned via `syscall.Kill(pid, 0)`.
+- The log is rotated on startup: truncated to last 500 lines if exceeding 1000.
 
 ### F3 — Session List Model
 
-Build the data model that the TUI renders.
-
 Each session entry contains:
-- **PID**: the Claude process PID
+- **SessionID**: the Claude Code session UUID
+- **ClaudePID**: the Claude process PID (for liveness checks)
 - **Working directory**: shortened path (`~` for home, truncate long paths)
 - **tmux target**: `session:window.pane` string (empty if detached)
 - **Project name**: last path component of the working directory
-- **Status**: busy, idle, or unknown (determined by pane capture)
+- **Status**: busy, idle, waiting, or unknown
+- **Action**: current activity (tool name, "Thinking…", "Permission", "Input")
 
 Sessions are sorted alphabetically by tmux session name, then by window index.
 
@@ -48,12 +53,12 @@ Interactive terminal list with keyboard navigation.
 
 **Display per session (single line):**
 ```
-  claude-tmux   work:2   ~/projects/personal
-> claude-tmux   work:1   ~/projects/personal/configs    ← selected
+  claude-tmux   work:2   ~/projects/personal              Bash
+> claude-tmux   work:1   ~/projects/personal/configs    Thinking…    ← selected
   claude-tmux   univ:8   ~/projects/universe/admin
 ```
 
-Format: `{project_name}   {tmux_session}:{window}   {shortened_path}`
+Format: `{status} {project_name}   {tmux_session}:{window}   {shortened_path}   {action}`
 
 Selected line highlighted with cursor indicator and accent color.
 
@@ -62,6 +67,7 @@ Selected line highlighted with cursor indicator and accent color.
 |-----|--------|
 | `j` / `↓` | Move cursor down |
 | `k` / `↑` | Move cursor up |
+| `G` / `g` | Jump to bottom / top |
 | `Enter` | Jump to selected session |
 | `q` / `Esc` / `Ctrl-C` | Quit |
 | `/` | Enter filter mode (type to filter list) |
@@ -82,13 +88,14 @@ Switch to the selected session's tmux pane.
   - **Outside tmux**: exec `tmux attach-session -t {target}`
 - Use `syscall.Exec` to replace the process so tmux popup closes cleanly.
 
-### F6 — Refresh on Focus
+### F6 — Refresh
 
 Keep the list current while the popup is open.
 
-- On startup, perform a full scan (F1 + F2).
-- Set a tick interval (e.g. 2 seconds) to re-scan and update the list.
-- Preserve cursor position across refreshes (match by PID).
+- On startup, perform log rotation and initial read.
+- Set a tick interval (750ms) to re-read the event log and update the list.
+- Preserve cursor position across refreshes (match by SessionID).
+- A separate 150ms tick drives the spinner animation for busy sessions.
 
 ---
 
@@ -112,17 +119,17 @@ claude-tmux/
 ├── cmd/
 │   └── claude-tmux/
 │       └── main.go              # Entry point, CLI flags
+├── hooks/
+│   └── claude-tmux-hook.sh      # Bash hook for Claude Code events
 ├── internal/
 │   ├── tui/
 │   │   ├── model.go             # Bubbletea model, Update, View
 │   │   └── styles.go            # Lipgloss style definitions
 │   ├── session/
-│   │   ├── scanner.go           # Process discovery (F1)
-│   │   ├── tmux.go              # tmux pane mapping (F2)
-│   │   ├── session.go           # Session data type (F3)
-│   │   └── status.go            # Pane capture & busy/idle detection
+│   │   ├── session.go           # Session data type, sorting
+│   │   └── events.go            # Event log reader & state derivation
 │   └── tmux/
-│       └── jump.go              # tmux switch/attach logic (F5)
+│       └── jump.go              # tmux switch/attach logic
 ├── docs/
 │   └── SPEC.md                  # This file
 ├── go.mod
@@ -138,16 +145,13 @@ claude-tmux/
 
 **`internal/session`** — All session discovery logic. No TUI dependency.
 
-- `session.go` — `Session` struct definition, `Status` type, sorting.
-- `scanner.go` — `Scan() ([]Session, error)` — runs ps, parses output, filters children, resolves working directories.
-- `tmux.go` — `MapPanes(sessions []Session) []Session` — queries tmux, walks process trees, attaches pane targets.
-- `status.go` — `CaptureStatuses(sessions []Session)` — captures tmux pane content, detects busy/idle/unknown status via spinner and prompt patterns.
+- `session.go` — `Session` struct definition, `Status` type, sorting, path utils.
+- `events.go` — `ReadSessions()` reads `~/.claude-tmux/events.log`, derives session state from events. `RotateLog()` truncates on startup.
 
 **`internal/tui`** — Bubbletea model, view, and styles.
 
-- `model.go` — `model` struct, `Init()`, `Update()`, `View()`, `Run()`. Two modes: `ModeNormal`, `ModeFilter`.
-- `styles.go` — Lipgloss style constants for selected/unselected/header/filter.
-- `keys.go` — Key constants and help text.
+- `model.go` — `model` struct, `Init()`, `Update()`, `View()`, `Run()`. Two modes: `modeNormal`, `modeFilter`.
+- `styles.go` — Lipgloss style constants for all visual elements.
 
 **`internal/tmux`** — tmux command execution.
 
@@ -155,147 +159,12 @@ claude-tmux/
 
 ---
 
-## Build Plan
-
-Ordered implementation steps. Each step produces testable, runnable output.
-
-### Step 1 — Project Scaffold
-
-- `go mod init github.com/Jevs21/claude-tmux`
-- Create directory structure
-- `Makefile` (build, test, clean)
-- Minimal `main.go` that prints version
-
-### Step 2 — Session Data Types
-
-File: `internal/session/session.go`
-
-```go
-type Session struct {
-    PID         int
-    PPID        int
-    WorkDir     string
-    ProjectName string
-    TmuxTarget  string   // "session:window.pane" or empty
-    TmuxSession string   // just the session name
-    WindowIndex int
-    PaneIndex   int
-}
-```
-
-- `ShortenPath(path string) string` — replaces home dir with `~`, truncates long paths
-- `Sort(sessions []Session)` — sort by tmux session, then window index
-
-### Step 3 — Process Scanner
-
-File: `internal/session/scanner.go`
-
-- `Scan() ([]Session, error)`
-- Exec `ps -axo pid,ppid,comm,command`
-- Parse output, match `comm == "claude"`
-- Build PID→PPID map, filter child processes
-- Resolve working directory via `lsof -p <pid>`
-- Return `[]Session` with PID, PPID, WorkDir, ProjectName populated
-
-Write tests with mock ps output.
-
-### Step 4 — tmux Pane Mapping
-
-File: `internal/session/tmux.go`
-
-- `MapPanes(sessions []Session) []Session`
-- Exec `tmux list-panes -a -F "#{pane_pid} #{session_name} #{window_index} #{pane_index}"`
-- Parse into map `panePID → (session, window, pane)`
-- For each session, walk PID→PPID tree to find matching pane PID
-- Populate TmuxTarget, TmuxSession, WindowIndex, PaneIndex
-- Process tree data comes from a single `ps -axo pid,ppid` call
-
-### Step 5 — tmux Jump
-
-File: `internal/tmux/jump.go`
-
-- `Jump(target string) error`
-- Check `$TMUX` env var
-- Inside tmux: `syscall.Exec("tmux", ["tmux", "switch-client", "-t", target])`
-- Outside tmux: `syscall.Exec("tmux", ["tmux", "attach-session", "-t", target])`
-
-### Step 6 — TUI Styles
-
-File: `internal/tui/styles.go`
-
-Define lipgloss styles:
-- `selectedStyle` — bold, accent foreground, background highlight
-- `normalStyle` — dim foreground
-- `headerStyle` — bold, accent color
-- `filterStyle` — for the filter input prompt
-- `pathStyle` — dimmed path color
-- `tmuxStyle` — distinct color for tmux target column
-- `emptyStyle` — message when no sessions found
-
-Color palette: gruvbox-inspired (matches rpai default).
-
-### Step 7 — TUI Model & View
-
-File: `internal/tui/model.go`
-
-Model:
-```go
-type model struct {
-    sessions      []session.Session
-    filtered      []session.Session  // subset after filter
-    cursor        int
-    mode          mode               // ModeNormal | ModeFilter
-    filterInput   textinput.Model
-    filterText    string
-    err           error
-    width         int
-    height        int
-}
-```
-
-Messages:
-- `tea.KeyMsg` — keyboard input
-- `sessionsMsg` — result of async scan
-- `tickMsg` — periodic refresh trigger
-
-Update:
-- `ModeNormal`: j/k navigation, enter to jump, `/` to filter, q to quit
-- `ModeFilter`: text input, esc to cancel, enter to jump
-
-View:
-- Header line: `Claude Sessions (N)`
-- Session list: one line per session, columns aligned
-- Footer: keybinding hints
-- Empty state: "No Claude sessions found"
-
-### Step 8 — Periodic Refresh
-
-- `tickCmd()` returns a `tea.Tick` command at 2-second intervals
-- On tick, re-run `Scan()` + `MapPanes()` as a `tea.Cmd`
-- On `sessionsMsg`, update session list, reapply filter, preserve cursor by PID
-
-### Step 9 — Integration & Polish
-
-- Wire everything together in `main.go`
-- `tea.WithAltScreen()` for clean tmux popup behavior
-- Test in tmux popup: `tmux display-popup -E "claude-tmux"`
-- Handle edge cases: no tmux, no sessions, terminal resize
-- `CLAUDE.md` project documentation
-
-### Step 10 — Release Tooling
-
-- `.goreleaser.yml` (darwin amd64/arm64, linux amd64/arm64)
-- `.github/workflows/test.yml`
-- `.github/workflows/release.yml`
-
----
-
 ## Key Design Decisions
 
-1. **Go + Bubbletea** — matches jeb-todo-md patterns, Charm ecosystem for TUI.
-2. **Process scanning via ps/lsof** — no external dependencies, works on macOS and Linux.
-3. **syscall.Exec for jump** — replaces the TUI process entirely so tmux popup closes cleanly without a lingering shell.
-4. **Separate session package** — keeps discovery logic testable and independent of TUI.
-5. **Single-line session display** — compact for tmux popup, scannable at a glance.
-6. **Filter over search** — type-ahead filtering is faster than a separate search mode for small lists.
-7. **2-second refresh** — balances freshness with low overhead. Process scanning is cheap.
+1. **Hooks over process scanning** — Claude Code hooks provide authoritative session state directly, eliminating fragile regex heuristics on pane content and process tree walks.
+2. **JSON lines event log** — Simple append-only format. Single-line `echo >>` is atomic enough for concurrent writers. No file locking needed.
+3. **Go + Bubbletea** — matches jeb-todo-md patterns, Charm ecosystem for TUI.
+4. **syscall.Exec for jump** — replaces the TUI process entirely so tmux popup closes cleanly without a lingering shell.
+5. **Separate session package** — keeps discovery logic testable and independent of TUI.
+6. **750ms refresh** — file read is cheap; faster polling than the old 2s process scan gives more responsive status updates.
+7. **Log rotation on startup** — prevents unbounded growth without a separate daemon.
