@@ -1,6 +1,8 @@
 package session
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestDetectStatus_SpinnerWithEllipsis(t *testing.T) {
 	paneContent := "✻ Fiddle-faddling…\n"
@@ -154,5 +156,73 @@ func TestDetectStatus_BusyTakesPrecedenceOverWaiting(t *testing.T) {
 	status := detectStatus(paneContent)
 	if status != StatusBusy {
 		t.Errorf("expected StatusBusy to take precedence over waiting, got %d", status)
+	}
+}
+
+func TestSanitizeLine(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"zero-width space", "\u200Bhello", "hello"},
+		{"BOM", "\uFEFFhello", "hello"},
+		{"non-breaking space", "\u00A0hello", " hello"},
+		{"zero-width joiner", "\u200Dhello", "hello"},
+		{"zero-width non-joiner", "\u200Chello", "hello"},
+		{"ANSI escape", "\x1b[1mhello\x1b[0m", "hello"},
+		{"ANSI color", "\x1b[38;5;12m❯\x1b[0m 1. Yes", "❯ 1. Yes"},
+		{"mixed invisible chars", " \u200B\u00A0❯\u200B 1. Yes", "  ❯ 1. Yes"},
+		{"clean input unchanged", "❯ 1. Yes", "❯ 1. Yes"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := sanitizeLine(testCase.input)
+			if result != testCase.expected {
+				t.Errorf("sanitizeLine(%q) = %q, want %q", testCase.input, result, testCase.expected)
+			}
+		})
+	}
+}
+
+func TestDetectStatus_WaitingWithZeroWidthSpace(t *testing.T) {
+	paneContent := "Do you want to proceed?\n\u200B❯ 1. Yes\n  2. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting with zero-width space, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingWithBOM(t *testing.T) {
+	paneContent := "Do you want to proceed?\n\uFEFF❯ 1. Yes\n  2. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting with BOM, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingWithANSIEscapes(t *testing.T) {
+	paneContent := "Do you want to proceed?\n\x1b[1m❯\x1b[0m 1. Yes\n  2. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting with ANSI escapes, got %d", status)
+	}
+}
+
+func TestDetectStatus_WaitingFallbackPromptQuestion(t *testing.T) {
+	// No ❯ at all — fallback detects "Do you want to proceed?" + numbered options
+	paneContent := " Do you want to proceed?\n  1. Yes\n  2. No\n"
+	status := detectStatus(paneContent)
+	if status != StatusWaiting {
+		t.Errorf("expected StatusWaiting via prompt question fallback, got %d", status)
+	}
+}
+
+func TestDetectStatus_NotWaitingPromptQuestionWithoutOptions(t *testing.T) {
+	// "Do you want to proceed?" but no numbered options → unknown
+	paneContent := " Do you want to proceed?\n"
+	status := detectStatus(paneContent)
+	if status != StatusUnknown {
+		t.Errorf("expected StatusUnknown for prompt question without options, got %d", status)
 	}
 }

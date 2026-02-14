@@ -2,6 +2,7 @@ package session
 
 import (
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -9,6 +10,31 @@ import (
 
 // spinnerChars are the characters Claude Code uses for its activity spinner.
 var spinnerChars = []rune{'✻', '✽', '✳', '·', '✶', '✢'}
+
+// ansiEscapePattern matches ANSI escape sequences that may leak into tmux captures.
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// sanitizeLine strips invisible Unicode characters and ANSI escape sequences
+// from a line of tmux capture output. TUI frameworks may inject zero-width
+// characters or formatting codes that break exact string matching.
+func sanitizeLine(line string) string {
+	line = ansiEscapePattern.ReplaceAllString(line, "")
+	var builder strings.Builder
+	builder.Grow(len(line))
+	for _, r := range line {
+		switch r {
+		case '\u200B', '\u200C', '\u200D', '\uFEFF':
+			// Strip zero-width space, zero-width (non-)joiner, BOM
+			continue
+		case '\u00A0':
+			// Replace non-breaking space with regular space
+			builder.WriteRune(' ')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
 
 // CaptureStatuses captures tmux pane content for each session and sets the
 // Status field based on whether the session appears busy or idle.
@@ -86,6 +112,31 @@ func detectNumberedOptions(lines []string) bool {
 	return foundOptions[1] && foundOptions[2] && hasSelectorOnOption
 }
 
+// detectPromptQuestion is a fallback waiting detector. It looks for the Claude Code
+// permission prompt text "Do you want to proceed?" followed by numbered options
+// within the next 5 lines. This catches cases where the ❯ selector is garbled
+// by invisible characters but the prompt text and option numbers are intact.
+func detectPromptQuestion(lines []string) bool {
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.Contains(trimmed, "Do you want to proceed?") {
+			continue
+		}
+		foundOptions := make(map[int]bool)
+		end := min(len(lines), i+6)
+		for _, nearby := range lines[i+1 : end] {
+			optionNumber, _, matched := parseNumberedOption(nearby)
+			if matched {
+				foundOptions[optionNumber] = true
+			}
+		}
+		if foundOptions[1] && foundOptions[2] {
+			return true
+		}
+	}
+	return false
+}
+
 // detectStatus examines pane content to determine if a Claude session is busy,
 // waiting for input, or idle.
 //
@@ -111,6 +162,9 @@ func detectStatus(paneContent string) Status {
 	}
 
 	lines := strings.Split(paneContent, "\n")
+	for i, line := range lines {
+		lines[i] = sanitizeLine(line)
+	}
 
 	hasSpinnerActivity := false
 	hasPrompt := false
@@ -137,6 +191,9 @@ func detectStatus(paneContent string) Status {
 		return StatusBusy
 	}
 	if detectNumberedOptions(lines) {
+		return StatusWaiting
+	}
+	if detectPromptQuestion(lines) {
 		return StatusWaiting
 	}
 	if hasPrompt {
