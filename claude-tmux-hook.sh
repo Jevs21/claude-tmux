@@ -44,7 +44,7 @@ jq -n --argjson ts "$TIMESTAMP" --arg sid "$SESSION_ID" \
 # format strings with #{@claude-state} conditionals if they prefer full control.
 # Also sets window-local format overrides using Powerline-compatible styling,
 # reading the status-bg color to construct proper triangle edges.
-# On idle: unsets everything so the window inherits global defaults cleanly.
+# On session-end: unsets all overrides so the tab reverts to global defaults.
 if [ -n "${TMUX_TARGET}" ]; then
     WINDOW_TARGET="${TMUX_TARGET%.*}"
 
@@ -87,8 +87,6 @@ if [ -n "${TMUX_TARGET}" ]; then
             tmux set-window-option -t "${WINDOW_TARGET}" -u @claude-state 2>/dev/null || true
             tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-format 2>/dev/null || true
             tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-current-format 2>/dev/null || true
-            tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-style 2>/dev/null || true
-            tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-current-style 2>/dev/null || true
             ;;
     esac
 fi
