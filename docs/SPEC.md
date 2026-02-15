@@ -131,12 +131,12 @@ claude-tmux/
 │   └── tmux/
 │       └── jump.go              # tmux switch/attach logic
 ├── docs/
+│   ├── README.md                # Project README with setup instructions
 │   └── SPEC.md                  # This file
 ├── go.mod
 ├── go.sum
 ├── Makefile
-├── CLAUDE.md
-└── README.md
+└── CLAUDE.md
 ```
 
 ### Package Responsibilities

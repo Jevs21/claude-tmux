@@ -19,6 +19,7 @@ internal/tui/styles.go            # Lipgloss style constants (package tui)
 internal/session/session.go       # Session data type, sorting, path utils (package session)
 internal/session/events.go        # Event log reader & state derivation (package session)
 internal/tmux/jump.go             # tmux switch/attach via syscall.Exec (package tmux)
+docs/README.md                    # Project README with setup instructions
 docs/SPEC.md                      # Feature spec and build plan
 ```
 
