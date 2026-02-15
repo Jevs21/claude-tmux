@@ -1,6 +1,3 @@
-# Hook debug log
-cc-hooks.log
-
 # env file
 .env
 
