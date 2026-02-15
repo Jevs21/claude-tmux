@@ -38,3 +38,9 @@ jq -n --argjson ts "$TIMESTAMP" --arg sid "$SESSION_ID" \
     --arg event "$EVENT_NAME" --argjson pid "$CLAUDE_PID" \
     --arg cwd "$CWD" --arg tmux "$TMUX_TARGET" --arg tool "$TOOL_NAME" \
     '{ts:$ts, sid:$sid, event:$event, pid:$pid, cwd:$cwd, tmux:$tmux, tool:$tool}' -c >> "${LOG_FILE}"
+
+# Rotate log if it exceeds 1000 lines to prevent unbounded growth.
+# The Go-side RotateLog() is a secondary safety net; this is the primary cap.
+if (( $(wc -l < "$LOG_FILE") > 1000 )); then
+    tail -500 "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+fi

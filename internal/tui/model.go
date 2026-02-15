@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -414,8 +415,10 @@ func (m *model) restoreCursorBySessionID(sessionID string) {
 
 // Run starts the Bubbletea TUI program and handles the jump after exit.
 func Run() error {
-	// Rotate log on startup to prevent unbounded growth
-	_ = session.RotateLog()
+	// Rotate log on startup as a secondary safety net (hook script does primary rotation).
+	if err := session.RotateLog(); err != nil {
+		log.Printf("warning: failed to rotate event log: %v", err)
+	}
 
 	m := initialModel()
 	program := tea.NewProgram(m, tea.WithAltScreen())
