@@ -274,31 +274,3 @@ func TestRenderStatusIndicator(t *testing.T) {
 	}
 }
 
-func TestTruncateToWidth(t *testing.T) {
-	t.Run("short string returned as-is", func(t *testing.T) {
-		input := "hello"
-		result := truncateToWidth(input, 20)
-		if result != input {
-			t.Errorf("expected %q, got %q", input, result)
-		}
-	})
-
-	t.Run("string exactly at maxWidth returned as-is", func(t *testing.T) {
-		input := "12345"
-		result := truncateToWidth(input, 5)
-		if result != input {
-			t.Errorf("expected %q, got %q", input, result)
-		}
-	})
-
-	t.Run("overlength string returns original (current behavior)", func(t *testing.T) {
-		// The current implementation is a no-op for overlength strings —
-		// it returns the original string and lets the terminal handle wrapping.
-		// This test documents that behavior.
-		input := "this is a long string"
-		result := truncateToWidth(input, 5)
-		if result != input {
-			t.Errorf("expected original string returned (current no-op behavior), got %q", result)
-		}
-	})
-}

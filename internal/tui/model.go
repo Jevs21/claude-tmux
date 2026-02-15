@@ -9,7 +9,6 @@ import (
 	"github.com/Jevs21/claude-tmux/internal/tmux"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 const refreshInterval = 750 * time.Millisecond
@@ -321,11 +320,6 @@ func (m model) View() string {
 			}
 		}
 
-		// Truncate to terminal width
-		if m.width > 0 {
-			line = truncateToWidth(line, m.width)
-		}
-
 		builder.WriteString(line)
 		builder.WriteString("\n")
 	}
@@ -416,20 +410,6 @@ func (m *model) restoreCursorBySessionID(sessionID string) {
 		}
 	}
 	m.clampCursor()
-}
-
-// truncateToWidth truncates a string to fit within a given width,
-// accounting for ANSI escape sequences.
-func truncateToWidth(s string, maxWidth int) string {
-	// Use lipgloss to measure the printed width (ignoring ANSI codes)
-	printedWidth := lipgloss.Width(s)
-	if printedWidth <= maxWidth {
-		return s
-	}
-
-	// Simple truncation: strip ANSI, truncate, re-apply would be complex.
-	// Instead, just let the terminal handle wrapping — the line will be cut off.
-	return s
 }
 
 // Run starts the Bubbletea TUI program and handles the jump after exit.
