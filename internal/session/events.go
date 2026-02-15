@@ -237,7 +237,10 @@ func isProcessAlive(pid int) bool {
 }
 
 // RotateLog truncates the event log to the last 500 lines if it exceeds 1000 lines.
-// Called on startup to prevent unbounded log growth.
+// This is a secondary safety net called on TUI startup; the primary rotation happens
+// in the hook script after every append. Note: this has a small TOCTOU race — if the
+// hook appends between the read and the write-back, those events are lost. This is
+// acceptable for a TUI status display where the hook-side rotation is the main defense.
 func RotateLog() error {
 	logPath := eventLogPath()
 	if logPath == "" {
