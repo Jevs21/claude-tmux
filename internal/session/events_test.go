@@ -619,3 +619,108 @@ func TestReadSessions_TmuxTargetParsedCorrectly(t *testing.T) {
 		t.Errorf("expected tmux target 'mywork:3.1', got %q", s.TmuxTarget)
 	}
 }
+
+func TestReadSessions_CWDUpdatedMidSession(t *testing.T) {
+	currentPID := os.Getpid()
+	ts := time.Now().Unix()
+
+	cleanup := writeTestLog(t, []string{
+		fmt.Sprintf(`{"ts":%d,"sid":"s1","event":"session-start","pid":%d,"cwd":"/proj/alpha","tmux":"work:0.0","tool":""}`, ts, currentPID),
+		fmt.Sprintf(`{"ts":%d,"sid":"s1","event":"user-prompt-submit","pid":%d,"cwd":"/proj/alpha","tmux":"work:0.0","tool":""}`, ts+1, currentPID),
+		fmt.Sprintf(`{"ts":%d,"sid":"s1","event":"pre-tool-use","pid":%d,"cwd":"/proj/beta","tmux":"work:0.0","tool":"Bash"}`, ts+2, currentPID),
+		fmt.Sprintf(`{"ts":%d,"sid":"s1","event":"stop","pid":%d,"cwd":"/proj/beta","tmux":"work:0.0","tool":""}`, ts+3, currentPID),
+	})
+	defer cleanup()
+
+	sessions, err := ReadSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].WorkDir != "/proj/beta" {
+		t.Errorf("expected WorkDir '/proj/beta', got %q", sessions[0].WorkDir)
+	}
+	if sessions[0].ProjectName != "beta" {
+		t.Errorf("expected ProjectName 'beta', got %q", sessions[0].ProjectName)
+	}
+}
+
+func TestReadSessions_EmptyLogFile(t *testing.T) {
+	// Create an empty events.log file (0 bytes)
+	cleanup := writeTestLog(t, []string{})
+	defer cleanup()
+
+	sessions, err := ReadSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions from empty log, got %d", len(sessions))
+	}
+}
+
+func TestReadSessions_OnlySessionEnd(t *testing.T) {
+	// A session-end for an ID that was never started should be a harmless no-op
+	cleanup := writeTestLog(t, []string{
+		`{"ts":1707900000,"sid":"ghost","event":"session-end","pid":12345,"cwd":"/proj","tmux":"work:0.0","tool":""}`,
+	})
+	defer cleanup()
+
+	sessions, err := ReadSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions for session-end only, got %d", len(sessions))
+	}
+}
+
+func TestRotateLog_ExactBoundary(t *testing.T) {
+	tmpDir := t.TempDir()
+	logDir := filepath.Join(tmpDir, ".claude-tmux")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		t.Fatalf("failed to create temp log dir: %v", err)
+	}
+
+	// Create a log with exactly 1001 lines (just over the 1000 threshold)
+	var lines []string
+	for i := 0; i < 1001; i++ {
+		lines = append(lines, fmt.Sprintf(`{"ts":%d,"sid":"s1","event":"pre-tool-use","pid":1,"cwd":"/proj","tmux":"w:0.0","tool":"line-%d"}`, 1707900000+i, i))
+	}
+
+	logFile := filepath.Join(logDir, "events.log")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write log: %v", err)
+	}
+
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", originalHome)
+
+	if err := RotateLog(); err != nil {
+		t.Fatalf("RotateLog error: %v", err)
+	}
+
+	rotatedContent, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read rotated log: %v", err)
+	}
+
+	rotatedLines := strings.Split(strings.TrimSpace(string(rotatedContent)), "\n")
+	if len(rotatedLines) != 500 {
+		t.Errorf("expected 500 lines after rotation, got %d", len(rotatedLines))
+	}
+
+	// First kept line should be line 501 (index 501, since 1001-500=501)
+	if !strings.Contains(rotatedLines[0], "line-501") {
+		t.Errorf("expected first kept line to contain 'line-501', got %q", rotatedLines[0])
+	}
+
+	// Last line should be the original last line (line-1000)
+	if !strings.Contains(rotatedLines[499], "line-1000") {
+		t.Errorf("expected last line to contain 'line-1000', got %q", rotatedLines[499])
+	}
+}
