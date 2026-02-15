@@ -18,10 +18,10 @@ mkdir -p "${LOG_DIR}"
 # Read JSON payload from stdin (Claude Code pipes it)
 PAYLOAD="$(cat)"
 
-# Extract fields from payload via jq
-SESSION_ID="$(echo "${PAYLOAD}" | jq -r '.session_id // empty' 2>/dev/null || true)"
-TOOL_NAME="$(echo "${PAYLOAD}" | jq -r '.tool_name // empty' 2>/dev/null || true)"
-CWD="$(echo "${PAYLOAD}" | jq -r '.cwd // empty' 2>/dev/null || true)"
+# Extract fields from payload via jq (single invocation)
+IFS=$'\t' read -r SESSION_ID TOOL_NAME CWD < <(
+    echo "${PAYLOAD}" | jq -r '[.session_id // "", .tool_name // "", .cwd // ""] | @tsv' 2>/dev/null || printf '\t\t'
+)
 
 # Capture the Claude process PID (our parent)
 CLAUDE_PID="${PPID}"
@@ -32,6 +32,9 @@ if [ -n "${TMUX:-}" ]; then
     TMUX_TARGET="$(tmux display-message -t "$TMUX_PANE" -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null || true)"
 fi
 
-# Build and append the JSON event line (atomic single-line append)
+# Build and append the JSON event line (uses jq to safely handle special characters)
 TIMESTAMP="$(date +%s)"
-echo "{\"ts\":${TIMESTAMP},\"sid\":\"${SESSION_ID}\",\"event\":\"${EVENT_NAME}\",\"pid\":${CLAUDE_PID},\"cwd\":\"${CWD}\",\"tmux\":\"${TMUX_TARGET}\",\"tool\":\"${TOOL_NAME}\"}" >> "${LOG_FILE}"
+jq -n --argjson ts "$TIMESTAMP" --arg sid "$SESSION_ID" \
+    --arg event "$EVENT_NAME" --argjson pid "$CLAUDE_PID" \
+    --arg cwd "$CWD" --arg tmux "$TMUX_TARGET" --arg tool "$TOOL_NAME" \
+    '{ts:$ts, sid:$sid, event:$event, pid:$pid, cwd:$cwd, tmux:$tmux, tool:$tool}' -c >> "${LOG_FILE}"

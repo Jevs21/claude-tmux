@@ -4,8 +4,7 @@ import "github.com/charmbracelet/lipgloss"
 
 // Gruvbox-inspired color palette
 var (
-	colorForeground = lipgloss.Color("#ebdbb2")
-	colorDim        = lipgloss.Color("#928374")
+	colorDim = lipgloss.Color("#928374")
 	colorAccent     = lipgloss.Color("#fe8019") // orange
 	colorGreen      = lipgloss.Color("#b8bb26")
 	colorBlue       = lipgloss.Color("#83a598")
@@ -21,17 +20,9 @@ var (
 			Foreground(colorAccent).
 			MarginBottom(1)
 
-	selectedStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorForeground).
-			Background(colorSelectedBg)
-
 	cursorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorAccent)
-
-	normalStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
 
 	projectStyle = lipgloss.NewStyle().
 			Foreground(colorGreen)
