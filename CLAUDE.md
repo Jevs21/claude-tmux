@@ -1,43 +1,29 @@
 # claude-tmux
 
-A TUI tool for navigating between running Claude Code sessions in tmux.
+A bash hook script that colors tmux tabs based on Claude Code session state.
 
 ## Tech Stack
 
-- Go 1.24
-- [Bubbletea](https://github.com/charmbracelet/bubbletea) v1 - TUI framework (Elm architecture)
-- [Bubbles](https://github.com/charmbracelet/bubbles) - textinput component for filtering
-- [Lipgloss](https://github.com/charmbracelet/lipgloss) v1 - terminal styling
+- Bash
+- [jq](https://jqlang.github.io/jq/) — JSON parsing in the hook script
+- tmux — tab coloring via window-option overrides
 
 ## Project Structure
 
 ```
-cmd/claude-tmux/main.go          # Thin entry point (package main)
-hooks/claude-tmux-hook.sh        # Bash hook for Claude Code event capture
-internal/tui/model.go             # Bubbletea model & TUI logic (package tui)
-internal/tui/styles.go            # Lipgloss style constants (package tui)
-internal/session/session.go       # Session data type, sorting, path utils (package session)
-internal/session/events.go        # Event log reader & state derivation (package session)
-internal/tmux/jump.go             # tmux switch/attach via syscall.Exec (package tmux)
-docs/README.md                    # Project README with setup instructions
-docs/SPEC.md                      # Feature spec and build plan
+hooks/claude-tmux-hook.sh   # Hook script — the entire product
+docs/README.md              # Installation and usage docs
+LICENSE                     # MIT license
 ```
 
 ## Architecture
 
-### Hooks-based Session Monitoring
-
-Session state is derived from a structured event log written by a Claude Code hook script, rather than process scanning or pane capture.
-
-```
-Hook fires (Claude Code) -> bash script appends JSON line -> ~/.claude-tmux/events.log
-                                                                    ^
-                                              Go TUI reads file on 750ms tick
-```
-
 ### Hook Script
 
-`hooks/claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1` and reads the JSON payload from stdin. It extracts `session_id`, `cwd`, and `tool_name` via `jq`, captures the Claude PID via `$PPID` and the tmux target via `tmux display-message`, then appends a single JSON line to `~/.claude-tmux/events.log`.
+`hooks/claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1` and reads the JSON payload from stdin. It extracts `session_id`, `cwd`, and `tool_name` via `jq`, captures the Claude PID via `$PPID` and the tmux target via `tmux display-message`, then:
+
+1. Appends a single JSON line to `~/.claude-tmux/events.log`
+2. Sets tmux tab colors based on the event type
 
 ### Event Log Format
 
@@ -48,72 +34,40 @@ One JSON object per line in `~/.claude-tmux/events.log`:
 {"ts":1707900005,"sid":"d2abb274-...","event":"pre-tool-use","pid":12345,"cwd":"/path","tmux":"work:2.0","tool":"Bash"}
 ```
 
-### State Derivation
+The log is rotated (truncated to 500 lines) when it exceeds 1000 lines.
 
-`session.ReadSessions()` reads the event log and derives session states:
+### Tab Coloring
 
-| Event | Status | Action |
-|-------|--------|--------|
-| `session-start` | Idle | -- |
-| `user-prompt-submit` | Busy | Thinking... |
-| `pre-tool-use` | Busy | {tool_name} |
-| `post-tool-use` / `post-tool-use-failure` | Busy | -- |
-| `stop` | Idle | -- |
-| `permission-request` | Waiting | Permission |
-| `notification-idle` | Idle | -- |
-| `notification-permission` | Waiting | Permission |
-| `notification-elicitation` | Waiting | Input |
-| `session-end` | (remove session) | -- |
+The hook sets tmux tab colors based on session state:
 
-Dead sessions (where `ClaudePID` is no longer alive) are pruned automatically. The log is rotated on startup (truncated to 500 lines if exceeding 1000).
+| Event | State | Tab Color |
+|-------|-------|-----------|
+| `user-prompt-submit`, `pre-tool-use`, `post-tool-use`, `post-tool-use-failure` | Busy | Yellow |
+| `permission-request`, `notification-permission`, `notification-elicitation` | Waiting | Blue |
+| `stop`, `notification-idle`, `session-start` | Idle | Green |
+| `session-end` | — | Reset (unset all overrides) |
 
-### TUI Modes
+### `@claude-state` User Option
 
-Two modes via a state machine in `model.Update()`:
+Each event sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) so users can build custom tmux format strings using `#{@claude-state}` conditionals instead of relying on the built-in coloring.
 
-- **modeNormal** -- Browse with j/k, enter to jump, / to filter, q to quit
-- **modeFilter** -- Text input filters sessions by substring match against project name, path, or tmux target
+### `STATUS_BG` Detection
 
-### Jump Mechanism
+The `set_tab_color` helper reads the global `status-bg` (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with the user's status bar theme. Falls back to `terminal` if unset.
 
-After TUI exits, if a session was selected, `tmux.Jump()` uses `syscall.Exec` to replace the process with `tmux switch-client -t <target>` (inside tmux) or `tmux attach-session -t <target>` (outside tmux). This ensures the tmux popup closes cleanly.
+### `set_tab_color` Helper
 
-### Session Status Display
+`set_tab_color <bg> <fg>` sets both `window-status-format` (inactive) and `window-status-current-format` (active) on the window target:
 
-Busy sessions display an animated yellow spinner in the TUI (150ms frame interval) with the current action (tool name or "Thinking...") shown in a dim italic column. Waiting sessions show a blue `?` with "Permission" or "Input". Idle sessions show a green dot. Unknown/detached sessions show a dim dot.
+- **Active tab**: Powerline arrow edges (``, ``) with bold text
+- **Inactive tab**: Flat edges that blend with the status bar background
 
-### Refresh
-
-A 750ms tick re-reads the event log and updates the list. Cursor position is preserved by matching on SessionID across refreshes. A separate 150ms tick drives the spinner animation for busy sessions.
+On `session-end`, all window-option overrides are unset so the tab reverts to global defaults.
 
 ## Commands
 
-- `go build -o claude-tmux ./cmd/claude-tmux` - Build
-- `go test ./...` - Run tests
-- `./claude-tmux` - Run the TUI
-- `./claude-tmux --version` - Show version
-- `make install-hook` - Show hook installation instructions
-
-## tmux Integration
-
-Add to `~/.tmux.conf`:
-```
-bind-key a display-popup -E "claude-tmux"
-```
+- `bash -n hooks/claude-tmux-hook.sh` — Syntax check the hook script
 
 ## Hook Installation
 
-The hook script requires `jq`. Install the hook by adding the configuration to `~/.claude/settings.json` (see `make install-hook` for the full config block).
-
-## Keybindings
-
-| Key | Mode | Action |
-|-----|------|--------|
-| j/k | Normal | Navigate up/down |
-| G/g | Normal | Jump to bottom/top |
-| enter | Normal | Jump to selected session |
-| / | Normal | Enter filter mode |
-| q/esc | Normal | Quit |
-| enter | Filter | Apply filter and jump |
-| esc | Filter | Clear filter |
-| ctrl+c | Any | Force quit |
+The hook script requires `jq`. Install the hook by adding the configuration to `~/.claude/settings.json` (see `docs/README.md` for the full config block).

@@ -1,44 +1,42 @@
 # claude-tmux
 
-[![CI](https://github.com/Jevs21/claude-tmux/actions/workflows/ci.yml/badge.svg)](https://github.com/Jevs21/claude-tmux/actions/workflows/ci.yml)
+A Claude Code [hook](https://docs.anthropic.com/en/docs/claude-code/hooks) that colors your tmux tabs based on session state — yellow when Claude is working, blue when it needs permission or input, green when idle.
 
-A TUI tool for monitoring and jumping between running Claude Code sessions in tmux.
-
-![Go](https://img.shields.io/badge/Go-1.24-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ## How It Works
 
-claude-tmux uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track session state. A hook script appends structured JSON events to `~/.claude-tmux/events.log` whenever Claude Code starts, stops, uses tools, or requests permission. The TUI reads this log on a 750ms tick to display live session status.
+A hook script fires on Claude Code events and sets tmux window-option overrides to color the tab for that pane. It also sets a `@claude-state` user option so you can build custom tmux format strings if you prefer full control.
 
 ```
-Claude Code hook fires → bash script appends JSON line → ~/.claude-tmux/events.log
-                                                                  ↑
-                                                    TUI reads on 750ms tick
+Claude Code hook fires → bash script → sets tmux tab color
 ```
+
+### Tab Colors
+
+| Color  | State   | Meaning                           |
+|--------|---------|-----------------------------------|
+| Yellow | Busy    | Claude is working (tools, thinking) |
+| Blue   | Waiting | Permission or input needed        |
+| Green  | Idle    | Session waiting for user input    |
+| Reset  | Ended   | Tab reverts to global defaults    |
 
 ## Prerequisites
 
-- **Go 1.24+** — to build from source
-- **tmux** — required for session switching
+- **tmux** — required (the hook sets tmux window options)
 - **jq** — required by the hook script to parse JSON payloads
 
 ## Installation
 
+### 1. Clone the repo
+
 ```bash
 git clone https://github.com/Jevs21/claude-tmux.git
-cd claude-tmux
-make build
 ```
 
-This produces a `claude-tmux` binary in the project root. Move it somewhere on your `$PATH`:
+### 2. Configure the hook
 
-```bash
-cp claude-tmux ~/.local/bin/   # or /usr/local/bin/
-```
-
-## Hook Setup
-
-The hook script (`hooks/claude-tmux-hook.sh`) must be registered with Claude Code. Add the following to your `~/.claude/settings.json` (adjust the path to where you cloned the repo):
+Add the following to your `~/.claude/settings.json` (adjust the path to where you cloned the repo):
 
 ```jsonc
 {
@@ -60,47 +58,25 @@ The hook script (`hooks/claude-tmux-hook.sh`) must be registered with Claude Cod
 }
 ```
 
-You can also run `make install-hook` to print this config with the correct absolute path filled in.
-
 > **Note:** If you already have hooks configured, merge the entries above into your existing `hooks` object.
 
-## tmux Keybinding
+## Custom Theming with `@claude-state`
 
-Add a keybinding to your `~/.tmux.conf` to launch claude-tmux as a popup:
+The hook sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) on each event. You can use this in your own tmux status format strings instead of relying on the built-in tab coloring:
 
 ```tmux
-bind-key a display-popup -E "claude-tmux"
+# Example: show state text in status bar
+set -g window-status-format '#I:#W #{?#{==:#{@claude-state},busy},⚡,#{?#{==:#{@claude-state},waiting},❓,}}'
 ```
 
-Then reload tmux config: `tmux source-file ~/.tmux.conf`
+## Powerline Compatibility
 
-## Usage
+The hook auto-detects your `status-bg` color (or parses it from `status-style`) to construct Powerline-compatible triangle edges (``, ``) that blend with your status bar theme.
 
-Launch directly or via your tmux keybinding:
+## Event Log
 
-```bash
-claude-tmux            # launch the TUI
-claude-tmux --version  # show version
-```
+The hook also appends structured JSON events to `~/.claude-tmux/events.log` for debugging or external tooling. The log is automatically rotated (truncated to 500 lines when it exceeds 1000).
 
-### Keybindings
+## License
 
-| Key       | Mode   | Action                     |
-|-----------|--------|----------------------------|
-| `j` / `k` | Normal | Navigate down / up          |
-| `G` / `g` | Normal | Jump to bottom / top        |
-| `Enter`   | Normal | Jump to selected session    |
-| `/`       | Normal | Enter filter mode           |
-| `q` / `Esc` | Normal | Quit                     |
-| `Enter`   | Filter | Apply filter and jump       |
-| `Esc`     | Filter | Clear filter, return to list|
-| `Ctrl+C`  | Any    | Force quit                  |
-
-### Session Status Indicators
-
-| Indicator | Status  | Meaning                          |
-|-----------|---------|----------------------------------|
-| `●` (green)  | Idle    | Session waiting for user input |
-| `◐` (yellow) | Busy    | Claude is working (with spinner) |
-| `?` (blue)   | Waiting | Permission or input needed     |
-| `○` (dim)    | Unknown | Session detached or unresponsive |
+MIT
