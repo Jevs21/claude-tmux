@@ -42,31 +42,47 @@ jq -n --argjson ts "$TIMESTAMP" --arg sid "$SESSION_ID" \
 # Apply tmux tab coloring based on session state.
 # Sets @claude-state as a user option on the window so users can build custom
 # format strings with #{@claude-state} conditionals if they prefer full control.
-# Also sets window-local format overrides using Powerline-compatible styling,
-# reading the status-bg color to construct proper triangle edges.
-# On session-end: unsets all overrides so the tab reverts to global defaults.
+# Saves the user's original format strings on first color change, then prepends
+# a #[fg=...,bg=...] directive to preserve content while adding color.
+# On session-end: restores original formats and cleans up all user options.
 if [ -n "${TMUX_TARGET}" ]; then
     WINDOW_TARGET="${TMUX_TARGET%.*}"
 
-    # Resolve status bar background color for Powerline triangle edges.
-    # Try status-bg first, then parse it from status-style.
-    STATUS_BG=$(tmux show-option -gqv status-bg 2>/dev/null)
-    if [ -z "${STATUS_BG}" ] || [ "${STATUS_BG}" = "default" ]; then
-        STATUS_STYLE=$(tmux show-option -gqv status-style 2>/dev/null)
-        STATUS_BG=$(printf '%s' "${STATUS_STYLE}" | sed -n 's/.*bg=\([^ ,]*\).*/\1/p')
+    # Save the user's original window-level format overrides on first color
+    # change. Uses @claude-saved-fmt / @claude-saved-curr-fmt user options.
+    # The sentinel __global__ means the window had no local override.
+    if [ -z "$(tmux show-window-option -t "${WINDOW_TARGET}" -v @claude-saved-fmt 2>/dev/null)" ]; then
+        orig_fmt="$(tmux show-window-option -t "${WINDOW_TARGET}" -v window-status-format 2>/dev/null)" || true
+        orig_curr_fmt="$(tmux show-window-option -t "${WINDOW_TARGET}" -v window-status-current-format 2>/dev/null)" || true
+        tmux set-window-option -t "${WINDOW_TARGET}" @claude-saved-fmt "${orig_fmt:-__global__}" 2>/dev/null || true
+        tmux set-window-option -t "${WINDOW_TARGET}" @claude-saved-curr-fmt "${orig_curr_fmt:-__global__}" 2>/dev/null || true
     fi
-    : "${STATUS_BG:=terminal}"
 
-    # Helper: set indicator tab formats for a given color.
-    # Active tab (window-status-current-format) gets visible Powerline arrow edges.
-    # Inactive tabs (window-status-format) get flat edges that blend with the
-    # status bar, matching the convention used by most Powerline themes.
+    # Helper: prepend a color directive to the user's format string.
+    # Reads the saved original (or global fallback) and prefixes it with
+    # #[fg=...,bg=...] so the color is visible without replacing content.
     set_tab_color() {
         local tab_bg="$1" tab_fg="$2"
+        local base_fmt base_curr_fmt saved
+
+        saved="$(tmux show-window-option -t "${WINDOW_TARGET}" -v @claude-saved-fmt 2>/dev/null)"
+        if [ "${saved}" = "__global__" ]; then
+            base_fmt="$(tmux show-option -gv window-status-format 2>/dev/null)"
+        else
+            base_fmt="${saved}"
+        fi
+
+        saved="$(tmux show-window-option -t "${WINDOW_TARGET}" -v @claude-saved-curr-fmt 2>/dev/null)"
+        if [ "${saved}" = "__global__" ]; then
+            base_curr_fmt="$(tmux show-option -gv window-status-current-format 2>/dev/null)"
+        else
+            base_curr_fmt="${saved}"
+        fi
+
         tmux set-window-option -t "${WINDOW_TARGET}" window-status-format \
-            "#[fg=${STATUS_BG},bg=${STATUS_BG}]#[fg=${tab_fg},bg=${tab_bg}] #I:#W #[fg=${STATUS_BG},bg=${STATUS_BG}]" 2>/dev/null || true
+            "#[fg=${tab_fg},bg=${tab_bg}]${base_fmt}" 2>/dev/null || true
         tmux set-window-option -t "${WINDOW_TARGET}" window-status-current-format \
-            "#[fg=${tab_bg},bg=${STATUS_BG}]#[fg=${tab_fg},bg=${tab_bg},bold] #I:#W #[fg=${tab_bg},bg=${STATUS_BG}]" 2>/dev/null || true
+            "#[fg=${tab_fg},bg=${tab_bg},bold]${base_curr_fmt}" 2>/dev/null || true
     }
 
     case "${EVENT_NAME}" in
@@ -76,17 +92,32 @@ if [ -n "${TMUX_TARGET}" ]; then
             ;;
         permission-request|notification-permission|notification-elicitation)
             tmux set-window-option -t "${WINDOW_TARGET}" @claude-state "waiting" 2>/dev/null || true
-            set_tab_color "blue" "black"
+            set_tab_color "blue" "white"
             ;;
         stop|notification-idle|session-start)
             tmux set-window-option -t "${WINDOW_TARGET}" @claude-state "idle" 2>/dev/null || true
             set_tab_color "green" "black"
             ;;
         session-end)
-            # Fully remove all overrides when the session ends.
+            # Restore original format strings saved on first color change.
+            saved_fmt="$(tmux show-window-option -t "${WINDOW_TARGET}" -v @claude-saved-fmt 2>/dev/null)" || true
+            saved_curr_fmt="$(tmux show-window-option -t "${WINDOW_TARGET}" -v @claude-saved-curr-fmt 2>/dev/null)" || true
+
+            if [ "${saved_fmt}" = "__global__" ] || [ -z "${saved_fmt}" ]; then
+                tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-format 2>/dev/null || true
+            else
+                tmux set-window-option -t "${WINDOW_TARGET}" window-status-format "${saved_fmt}" 2>/dev/null || true
+            fi
+            if [ "${saved_curr_fmt}" = "__global__" ] || [ -z "${saved_curr_fmt}" ]; then
+                tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-current-format 2>/dev/null || true
+            else
+                tmux set-window-option -t "${WINDOW_TARGET}" window-status-current-format "${saved_curr_fmt}" 2>/dev/null || true
+            fi
+
+            # Clean up all user options.
             tmux set-window-option -t "${WINDOW_TARGET}" -u @claude-state 2>/dev/null || true
-            tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-format 2>/dev/null || true
-            tmux set-window-option -t "${WINDOW_TARGET}" -u window-status-current-format 2>/dev/null || true
+            tmux set-window-option -t "${WINDOW_TARGET}" -u @claude-saved-fmt 2>/dev/null || true
+            tmux set-window-option -t "${WINDOW_TARGET}" -u @claude-saved-curr-fmt 2>/dev/null || true
             ;;
     esac
 fi
