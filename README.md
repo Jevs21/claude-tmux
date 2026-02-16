@@ -58,16 +58,16 @@ Add the following to your `~/.claude/settings.json` (adjust the path to where yo
 
 ## Custom Theming with `@claude-state`
 
-The hook sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) on each event. You can use this in your own tmux status format strings instead of relying on the built-in tab coloring:
+The hook sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) on each event. If the built-in style overrides conflict with your theme, you can use `@claude-state` in your own tmux format strings for full control:
 
 ```tmux
 # Example: show state text in status bar
 set -g window-status-format '#I:#W #{?#{==:#{@claude-state},busy},⚡,#{?#{==:#{@claude-state},waiting},❓,}}'
 ```
 
-## Powerline Compatibility
+## Theme Compatibility
 
-The hook auto-detects your `status-bg` color (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with your status bar theme.
+The hook saves your original `window-status-format` and `window-status-current-format` on the first color change, then prepends a `#[fg=...,bg=...]` directive to add color while preserving your format content. On session end, the originals are fully restored. Custom themes, Powerline segments, and status-line plugins continue to render their content — only the base colors change.
 
 ## Event Log
 
