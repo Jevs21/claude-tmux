@@ -20,7 +20,6 @@ The hook script fires on Claude Code events and sets tmux window-option override
 ## Prerequisites
 
 - **tmux** — required (the hook sets tmux window options)
-- **jq** — required to parse JSON payloads from Claude Code
 
 ## Installation
 
@@ -68,10 +67,6 @@ set -g window-status-format '#I:#W #{?#{==:#{@claude-state},busy},⚡,#{?#{==:#{
 ## Powerline Compatibility
 
 The hook auto-detects your `status-bg` color (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with your status bar theme.
-
-## Event Log
-
-The hook appends structured JSON events to `~/.claude-tmux/events.log` for debugging or external tooling. The log is automatically rotated (truncated to 500 lines when it exceeds 1000).
 
 ## License
 

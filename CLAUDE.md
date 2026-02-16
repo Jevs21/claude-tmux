@@ -5,7 +5,6 @@ A bash hook script that colors tmux tabs based on Claude Code session state.
 ## Tech Stack
 
 - Bash
-- [jq](https://jqlang.github.io/jq/) — JSON parsing
 - tmux — tab coloring via window-option overrides
 
 ## Project Structure
@@ -18,10 +17,7 @@ LICENSE               # MIT license
 
 ## Architecture
 
-`claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1` and reads the JSON payload from stdin. It extracts `session_id`, `cwd`, and `tool_name` via `jq`, captures the Claude PID via `$PPID` and the tmux target via `tmux display-message`, then:
-
-1. Appends a single JSON line to `~/.claude-tmux/events.log`
-2. Sets tmux tab colors based on the event type
+`claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1`, drains stdin (Claude Code pipes a JSON payload regardless), captures the tmux target via `tmux display-message`, then sets tmux tab colors based on the event type.
 
 ### Tab Coloring
 
@@ -39,10 +35,6 @@ Each event sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) s
 ### Powerline Edge Detection
 
 The `set_tab_color` helper reads the global `status-bg` (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with the user's status bar theme. Falls back to `terminal` if unset.
-
-### Log Rotation
-
-Events are appended as JSON lines to `~/.claude-tmux/events.log`. The log is truncated to 500 lines when it exceeds 1000.
 
 ## Commands
 
