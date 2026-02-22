@@ -1,11 +1,11 @@
 # claude-tmux
 
-A bash hook script that colors tmux tabs based on Claude Code session state.
+A bash hook script that exposes Claude Code session state to tmux via a window option.
 
 ## Tech Stack
 
 - Bash
-- tmux — tab coloring via window-option overrides
+- tmux — `@claude-state` window option
 
 ## Project Structure
 
@@ -17,24 +17,20 @@ LICENSE               # MIT license
 
 ## Architecture
 
-`claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the event name as `$1`, drains stdin (Claude Code pipes a JSON payload regardless), captures the tmux target via `tmux display-message`, then sets tmux tab colors based on the event type.
-
-### Tab Coloring
-
-| Event | State | Tab Color |
-|-------|-------|-----------|
-| `user-prompt-submit`, `pre-tool-use`, `post-tool-use`, `post-tool-use-failure` | Busy | Yellow |
-| `permission-request`, `notification-permission`, `notification-elicitation` | Waiting | Blue |
-| `stop`, `notification-idle`, `session-start` | Idle | Green |
-| `session-end` | — | Reset (unset all overrides) |
+`claude-tmux-hook.sh` is configured as a Claude Code hook. It receives the target state as `$1` (`busy`, `waiting`, `idle`, or `reset`), drains stdin (Claude Code pipes a JSON payload regardless), and sets or unsets a `@claude-state` tmux window option. The event-to-state mapping is handled in the `~/.claude/settings.json` hooks config, not in the script itself.
 
 ### `@claude-state` User Option
 
-Each event sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) so users can build custom tmux format strings using `#{@claude-state}` conditionals instead of relying on the built-in coloring.
+The hook sets `@claude-state` on the current tmux window. Users reference `#{@claude-state}` in their `tmux.conf` format strings to build whatever visual treatment they prefer (background colors, text indicators, icons, etc.). On `reset`, the option is unset and the tab reverts to its default appearance.
 
-### Powerline Edge Detection
+### States
 
-The `set_tab_color` helper reads the global `status-bg` (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with the user's status bar theme. Falls back to `terminal` if unset.
+| State     | Meaning                              |
+|-----------|--------------------------------------|
+| `busy`    | Claude is working (tools, thinking)  |
+| `waiting` | Permission or input needed           |
+| `idle`    | Ready for next prompt                |
+| `reset`   | Unsets `@claude-state` (session end) |
 
 ## Commands
 
