@@ -1,26 +1,27 @@
 # claude-tmux
 
-A Claude Code [hook](https://docs.anthropic.com/en/docs/claude-code/hooks) that colors your tmux tabs based on session state — yellow when Claude is working, blue when it needs permission or input, green when idle.
+A Claude Code [hook](https://docs.anthropic.com/en/docs/claude-code/hooks) that exposes session state to tmux — so you can color tabs, add indicators, or build any status display you want.
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## How It Works
 
-The hook script fires on Claude Code events and sets tmux window-option overrides to color the tab for that pane. It also sets a `@claude-state` user option so you can build custom tmux format strings if you prefer full control.
+The hook sets a `@claude-state` window option (`busy`, `waiting`, `idle`) on each Claude Code event. Your tmux config reads this option via `#{@claude-state}` to drive whatever visual treatment you prefer — background colors, status text, icons, etc.
 
-### Tab Colors
+On session end, the option is unset and the tab reverts to its default appearance.
 
-| Color  | State   | Meaning                           |
-|--------|---------|-----------------------------------|
-| Yellow | Busy    | Claude is working (tools, thinking) |
-| Blue   | Waiting | Permission or input needed        |
-| Green  | Idle    | Session waiting for user input    |
-| Reset  | Ended   | Tab reverts to global defaults    |
+### States
+
+| State     | Meaning                              |
+|-----------|--------------------------------------|
+| `busy`    | Claude is working (tools, thinking)  |
+| `waiting` | Permission or input needed           |
+| `idle`    | Ready for your next prompt           |
+| *(unset)* | No active Claude session in this tab |
 
 ## Prerequisites
 
 - **tmux** — required (the hook sets tmux window options)
-- **jq** — required to parse JSON payloads from Claude Code
 
 ## Installation
 
@@ -37,18 +38,18 @@ Add the following to your `~/.claude/settings.json` (adjust the path to where yo
 ```jsonc
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh session-start" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh session-end" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh user-prompt-submit" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh stop" }] }],
-    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh pre-tool-use" }] }],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh post-tool-use" }] }],
-    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh post-tool-use-failure" }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh permission-request" }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh idle" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh reset" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh busy" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh idle" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh busy" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh busy" }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh busy" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh waiting" }] }],
     "Notification": [
-      { "matcher": "idle_prompt", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh notification-idle" }] },
-      { "matcher": "permission_prompt", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh notification-permission" }] },
-      { "matcher": "elicitation_dialog", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh notification-elicitation" }] }
+      { "matcher": "idle_prompt", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh idle" }] },
+      { "matcher": "permission_prompt", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh waiting" }] },
+      { "matcher": "elicitation_dialog", "hooks": [{ "type": "command", "command": "/path/to/claude-tmux/claude-tmux-hook.sh waiting" }] }
     ]
   }
 }
@@ -56,22 +57,63 @@ Add the following to your `~/.claude/settings.json` (adjust the path to where yo
 
 > **Note:** If you already have hooks configured, merge the entries above into your existing `hooks` object.
 
-## Custom Theming with `@claude-state`
+### 3. Add to your tmux config
 
-The hook sets a `@claude-state` window option (`busy`, `waiting`, or `idle`) on each event. You can use this in your own tmux status format strings instead of relying on the built-in tab coloring:
+The hook only sets the `@claude-state` option — your `~/.tmux.conf` decides how to display it. See the [examples](#examples) below, then reload your config:
 
-```tmux
-# Example: show state text in status bar
-set -g window-status-format '#I:#W #{?#{==:#{@claude-state},busy},⚡,#{?#{==:#{@claude-state},waiting},❓,}}'
+```bash
+tmux source-file ~/.tmux.conf
 ```
 
-## Powerline Compatibility
+## Examples
 
-The hook auto-detects your `status-bg` color (or parses it from `status-style`) to construct Powerline-compatible triangle edges that blend with your status bar theme.
+All examples use the `#{@claude-state}` window option. The key building blocks:
 
-## Event Log
+- `#{@claude-state}` — the raw state string (`busy`, `waiting`, `idle`, or empty)
+- `#{?#{@claude-state},<if-set>,<if-unset>}` — conditional: is there an active Claude session?
+- `#{==:#{@claude-state},busy}` — compare against a specific state
 
-The hook appends structured JSON events to `~/.claude-tmux/events.log` for debugging or external tooling. The log is automatically rotated (truncated to 500 lines when it exceeds 1000).
+### Text label
+
+The simplest option — append the state as text to tabs running a Claude session. Works with any theme since it doesn't touch colors or styling.
+
+```tmux
+set -g window-status-current-format ' #I:#W#{?#{@claude-state}, [#{@claude-state}],} '
+set -g window-status-format ' #I:#W#{?#{@claude-state}, [#{@claude-state}],} '
+```
+
+Result: `0:zsh [busy]` during a session, `0:zsh` otherwise.
+
+### Background color on active tab
+
+Changes the active tab background per state. Tabs without a Claude session keep your default style.
+
+```tmux
+set -g window-status-current-format \
+  '#{?#{==:#{@claude-state},busy},#[bg=yellow fg=black],#{?#{==:#{@claude-state},waiting},#[bg=blue fg=white],#{?#{==:#{@claude-state},idle},#[bg=green fg=black],}}} #I:#W '
+```
+
+### Background color on all tabs
+
+Same as above but also colors inactive tabs, so you can see the state of every Claude session at a glance.
+
+```tmux
+set -g window-status-format \
+  '#{?#{==:#{@claude-state},busy},#[bg=yellow fg=black],#{?#{==:#{@claude-state},waiting},#[bg=blue fg=white],#{?#{==:#{@claude-state},idle},#[bg=green fg=black],}} #I:#W '
+set -g window-status-current-format \
+  '#{?#{==:#{@claude-state},busy},#[bg=yellow fg=black bold],#{?#{==:#{@claude-state},waiting},#[bg=blue fg=white bold],#{?#{==:#{@claude-state},idle},#[bg=green fg=black bold],}}} #I:#W '
+```
+
+### Minimal dot indicator
+
+Prepends a colored dot to tabs with an active session. Least intrusive — doesn't change your tab styling at all.
+
+```tmux
+set -g window-status-format \
+  '#{?#{==:#{@claude-state},busy},#[fg=yellow]● ,#{?#{==:#{@claude-state},waiting},#[fg=blue]● ,#{?#{==:#{@claude-state},idle},#[fg=green]● ,}}}#[default]#I:#W '
+set -g window-status-current-format \
+  '#{?#{==:#{@claude-state},busy},#[fg=yellow]● ,#{?#{==:#{@claude-state},waiting},#[fg=blue]● ,#{?#{==:#{@claude-state},idle},#[fg=green]● ,}}}#[default]#I:#W '
+```
 
 ## License
 
