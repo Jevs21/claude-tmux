@@ -17,7 +17,7 @@ On session end, the option is unset and the tab reverts to its default appearanc
 | `busy`    | Claude is working (tools, thinking)  |
 | `waiting` | Permission or input needed           |
 | `idle`    | Ready for your next prompt           |
-| *(unset)* | No active Claude session in this tab |
+| `reset`   | Unsets `@claude-state` (session end) |
 
 ## Prerequisites
 

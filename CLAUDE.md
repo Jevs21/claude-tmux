@@ -29,7 +29,7 @@ The hook sets `@claude-state` on the current tmux window. Users reference `#{@cl
 |-----------|--------------------------------------|
 | `busy`    | Claude is working (tools, thinking)  |
 | `waiting` | Permission or input needed           |
-| `idle`    | Ready for next prompt                |
+| `idle`    | Ready for your next prompt           |
 | `reset`   | Unsets `@claude-state` (session end) |
 
 ## Commands
