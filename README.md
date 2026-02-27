@@ -75,7 +75,7 @@ All examples use the `#{@claude-state}` window option. The key building blocks:
 
 ### Text label
 
-The simplest option — append the state as text to tabs running a Claude session. Works with any theme since it doesn't touch colors or styling.
+Append the state as text to tabs running a Claude session. Works with any theme since it doesn't touch colors.
 
 ```tmux
 set -g window-status-current-format ' #I:#W#{?#{@claude-state}, [#{@claude-state}],} '
@@ -84,18 +84,9 @@ set -g window-status-format ' #I:#W#{?#{@claude-state}, [#{@claude-state}],} '
 
 Result: `0:zsh [busy]` during a session, `0:zsh` otherwise.
 
-### Background color on active tab
+### Background color per state
 
-Changes the active tab background per state. Tabs without a Claude session keep your default style.
-
-```tmux
-set -g window-status-current-format \
-  '#{?#{==:#{@claude-state},busy},#[bg=yellow fg=black],#{?#{==:#{@claude-state},waiting},#[bg=blue fg=white],#{?#{==:#{@claude-state},idle},#[bg=green fg=black],}}} #I:#W '
-```
-
-### Background color on all tabs
-
-Same as above but also colors inactive tabs, so you can see the state of every Claude session at a glance.
+Changes tab background per state. Tabs without a Claude session keep your default style.
 
 ```tmux
 set -g window-status-format \
@@ -104,15 +95,20 @@ set -g window-status-current-format \
   '#{?#{==:#{@claude-state},busy},#[bg=yellow fg=black bold],#{?#{==:#{@claude-state},waiting},#[bg=blue fg=white bold],#{?#{==:#{@claude-state},idle},#[bg=green fg=black bold],}}} #I:#W '
 ```
 
-### Minimal dot indicator
+### My config
 
-Prepends a colored dot to tabs with an active session. Least intrusive — doesn't change your tab styling at all.
+A full working config with a transparent status bar and per-state coloring on both active and inactive tabs.
 
 ```tmux
-set -g window-status-format \
-  '#{?#{==:#{@claude-state},busy},#[fg=yellow]● ,#{?#{==:#{@claude-state},waiting},#[fg=blue]● ,#{?#{==:#{@claude-state},idle},#[fg=green]● ,}}}#[default]#I:#W '
-set -g window-status-current-format \
-  '#{?#{==:#{@claude-state},busy},#[fg=yellow]● ,#{?#{==:#{@claude-state},waiting},#[fg=blue]● ,#{?#{==:#{@claude-state},idle},#[fg=green]● ,}}}#[default]#I:#W '
+set -g status-style bg=default
+set -g status-bg default
+set -g status-left-length 50
+set -g status-left "#[fg=black,bg=colour245,bold]  %b %d, W%V ~ #H ~ #S  #[fg=default,bg=default]   "
+set -g status-right ""
+
+set -g window-status-style bg=default,fg=colour245
+set -g window-status-format '#{?#{==:#{@claude-state},waiting},#[fg=colour196]#[bold],#{?#{==:#{@claude-state},busy},#[fg=colour208],#{?#{==:#{@claude-state},idle},#[fg=colour114],#[fg=colour245]}}}    #I:#W    '
+set -g window-status-current-format '#[fg=black,bold]#{?#{==:#{@claude-state},busy},#[bg=colour208],#{?#{==:#{@claude-state},waiting},#[bg=colour196],#{?#{==:#{@claude-state},idle},#[bg=colour114],#[bg=colour141]}}}  » #I:#W «  '
 ```
 
 ## License
