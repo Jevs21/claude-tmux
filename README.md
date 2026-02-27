@@ -2,7 +2,10 @@
 
 A Claude Code [hook](https://docs.anthropic.com/en/docs/claude-code/hooks) that exposes session state to tmux — so you can color tabs, add indicators, or build any status display you want.
 
-![License](https://img.shields.io/badge/license-MIT-green)
+<div style="display: flex; gap: 10px;">
+  <img src="https://github.com/user-attachments/assets/5730548d-9aa3-4174-b98d-25a6655d2f93" width="48%"/>
+  <img src="https://github.com/user-attachments/assets/12f4ad83-c9d6-44ca-b3d6-2bce31129708" width="48%"/>
+</div>
 
 ## How It Works
 
@@ -113,4 +116,4 @@ set -g window-status-current-format '#[fg=black,bold]#{?#{==:#{@claude-state},bu
 
 ## License
 
-MIT
+![License](https://img.shields.io/badge/license-MIT-green)
